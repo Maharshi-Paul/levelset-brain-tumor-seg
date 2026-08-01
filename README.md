@@ -6,8 +6,9 @@
 
 **Fully automatic brain tumor segmentation from MRI — no manual seeding, no training data, no GPU. A K-Means + topological ROI search feeds a Numba-parallelized level set PDE solver, visualized live in a desktop dashboard.**
 
-Built by [Maharshi-Paul](https://github.com/Maharshi-Paul)
+Built by [Maharshi-Paul](https://github.com/Maharshi-Paul)  
 Poster by [DIPESHCHOUDHARY-CODES](https://github.com/DIPESHCHOUDHARY-CODES)
+
 ---
 
 ## Table of Contents
