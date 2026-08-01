@@ -1,33 +1,62 @@
-# levelset-brain-tumor-seg
+<p align="center">
+  <img src="assets/levelset_banner.png" alt="levelset-brain-tumor-seg banner" width="100%">
+</p>
 
-Multi-phase brain tumor segmentation from MRI using level set PDEs (active contours without edges), with a live CustomTkinter dashboard and a Numba-parallelized PDE solver.
+# MULTI PHASE SIMULATION OF BRAIN TUMOR SEGMENTATION
 
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+**Fully automatic brain tumor segmentation from MRI — no manual seeding, no training data, no GPU. A K-Means + topological ROI search feeds a Numba-parallelized level set PDE solver, visualized live in a desktop dashboard.**
 
-## Overview
+Built by [Maharshi-Paul](https://github.com/Maharshi-Paul)
 
-The app automatically segments tumor regions from grayscale MRI slices with no manual seeding required. It runs a three-stage pipeline and visualizes every stage live:
+---
 
-1. **Unsupervised clustering** — K-Means (5 clusters) on a CLAHE-enhanced, denoised image to separate tissue intensity classes.
-2. **Topological ROI search** — the three brightest clusters are scanned for contours, and each candidate is scored on area, solidity (convexity), and circularity to automatically select the most tumor-like region — no manual seed point needed.
-3. **Level set evolution** — the selected ROI is converted into a signed distance function and evolved with a Chan-Vese–style (active contours without edges) PDE, solved with a regularized Heaviside/Dirac formulation combining a curvature term and a two-phase region-fitting term.
+## Table of Contents
 
-All three stages are rendered side-by-side in real time as the simulation runs.
+- [Problem](#problem)
+- [Solution](#solution)
+- [On-Device Compute Usage](#on-device-compute-usage)
+- [Core Algorithm](#core-algorithm)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Setup](#setup)
+- [Usage](#usage)
+- [How It Works, Panel by Panel](#how-it-works-panel-by-panel)
+- [Optimizations](#optimizations)
+- [Screenshots](#screenshots)
+- [Known Limitations / Future Scope](#known-limitations--future-scope)
+- [License](#license)
 
-## Features
+---
 
-- **Numba JIT + parallel (`prange`) PDE solver** for fast, multi-core evolution of the level set
-- **Adaptive curvature weight (`mu`)** — chosen automatically based on image variance
-- **Automatic ROI selection** via contour scoring (area × solidity³ × circularity³), removing the need for manual initialization
-- **Live 3-panel visualization**: K-Means clusters → convex-hull ROI → evolving `φ = 0` contour, refreshed every 10 iterations
-- **Batch processing** with Prev/Next navigation across multiple uploaded images
-- **Dark-themed desktop GUI** (CustomTkinter) with progress bar, status indicator, and a running console log
-- **Preprocessing pipeline**: grayscale conversion, downscaling (max dimension 400px for solver performance), CLAHE contrast equalization, Gaussian smoothing
+## Problem
 
-## Mathematical Background
+Tumor segmentation in MRI is usually solved one of two ways: a radiologist manually annotates the boundary (slow, expensive, not scalable), or a deep learning model is trained on a large labeled dataset (needs GPU compute, labeled data, and often fails to generalize across scanners/protocols). Simpler intensity-based methods like thresholding break down on the low-contrast, noisy boundaries typical of tumor tissue — and most classical active-contour methods still require a human to manually place a seed point or bounding box before the algorithm can run.
 
-The segmentation boundary is represented implicitly as the zero level set of a signed distance function `φ`. At each iteration:
+## Solution
+
+`levelset-brain-tumor-seg` removes the manual step entirely. It's a **fully automatic, PDE-based segmentation pipeline** that runs on CPU only:
+
+1. **Unsupervised clustering** — K-Means (5 clusters) on a CLAHE-enhanced, denoised MRI slice separates tissue by intensity.
+2. **Automatic ROI detection** — the three brightest clusters are scanned for candidate contours, each scored on area, solidity (convexity), and circularity, so the most tumor-like region is selected without any human input.
+3. **Level set evolution (Chan-Vese)** — the selected ROI initializes a signed distance function, which is evolved via a regularized Heaviside/Dirac PDE combining a curvature term and a two-phase region-fitting term, converging to the tumor boundary.
+
+All three stages are rendered live, side-by-side, as the simulation runs.
+
+## On-Device Compute Usage
+
+**Runs 100% locally, CPU-only — no cloud inference, no GPU required:**
+
+| Component | What it does | Runs on |
+|---|---|---|
+| K-Means clustering (OpenCV) | Separates tissue by intensity into 5 classes | Local CPU |
+| Topological ROI search (OpenCV contours) | Scores candidate regions to auto-select the tumor ROI | Local CPU |
+| Level set PDE solver | Evolves the segmentation boundary to convergence | Local CPU, Numba JIT-compiled + parallelized (`prange`) |
+
+No network calls, no external services, no data leaves the machine at any stage.
+
+## Core Algorithm
+
+The tumor boundary is represented implicitly as the zero level set of a signed distance function `φ`. At each iteration:
 
 - Regional means `c1` (inside) and `c2` (outside) are computed as Heaviside-weighted averages of image intensity.
 - `φ` is updated according to:
@@ -36,9 +65,9 @@ The segmentation boundary is represented implicitly as the zero level set of a s
   ∂φ/∂t = δ(φ) · [ μ·κ(φ)  −  λ1·(I − c1)²  +  λ2·(I − c2)² ]
   ```
 
-  where `κ` is the curvature of the level set (computed from first/second-order finite differences), and `δ`, the regularized Dirac delta, and `H`, the regularized Heaviside function, are smoothed approximations for numerical stability.
+  where `κ` is the curvature of the level set (from finite-difference derivatives), and `δ` / `H` are regularized (smoothed) Dirac delta and Heaviside functions for numerical stability.
 
-This is the classic **Chan-Vese "active contours without edges"** formulation, which segments regions by intensity homogeneity rather than by gradient/edge strength — well suited to MRI, where tumor boundaries are often low-contrast.
+This is the classic **Chan-Vese "active contours without edges"** formulation — it segments by intensity homogeneity rather than by edge/gradient strength, which is well suited to MRI, where tumor boundaries are often low-contrast.
 
 **Default parameters** (tunable in code):
 
@@ -46,26 +75,60 @@ This is the classic **Chan-Vese "active contours without edges"** formulation, w
 |---|---|---|
 | `total_iterations` | 85 | Number of PDE evolution steps |
 | `dt` | 0.5 | Time step |
-| `λ1`, `λ2` | 1.0, 1.0 | Inside/outside region fitting weights |
+| `λ1`, `λ2` | 1.0, 1.0 | Inside / outside region-fitting weights |
 | `μ` | 0.5 or 0.25 | Curvature weight (adaptive on image variance) |
-| `ε` | 1.0 | Heaviside/Dirac regularization width |
+| `ε` | 1.0 | Heaviside / Dirac regularization width |
 
 ## Tech Stack
 
-- Python 3
-- [NumPy](https://numpy.org/)
-- [OpenCV](https://opencv.org/) (`opencv-python`) — I/O, CLAHE, K-Means, contours, distance transform
-- [Numba](https://numba.pydata.org/) — JIT compilation + parallel loops (`prange`) for the PDE core
-- [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) — GUI
-- [Matplotlib](https://matplotlib.org/) — embedded visualization canvas
+| Layer | Tool |
+|---|---|
+| PDE Solver | Custom Chan-Vese level set, JIT-compiled with `numba` (`@jit(nopython=True, parallel=True)`) |
+| Preprocessing | OpenCV (`cv2`) — CLAHE, Gaussian blur, K-Means, contours, distance transform |
+| GUI | CustomTkinter (dark theme) |
+| Visualization | Matplotlib, embedded via `FigureCanvasTkAgg` |
+| Language | Python 3.9+ |
 
-## Installation
+## Project Structure
 
-```bash
-pip install numpy opencv-python customtkinter matplotlib numba
+```
+levelset-brain-tumor-seg/
+├── main.py            # full app: preprocessing, K-Means, ROI search, PDE solver, GUI
+├── requirements.txt
+├── assets/             # banner / screenshots
+├── LICENSE
+└── README.md
 ```
 
-> Requires Python 3.9+. Numba's JIT compilation may take a few seconds on first run.
+> Currently a single-file application — `main.py` contains the full pipeline. A modular split (`solver.py`, `preprocessing.py`, `gui.py`) is a natural next step as the project grows.
+
+## Setup
+
+### 1. Clone the repo
+```bash
+git clone https://github.com/Maharshi-Paul/levelset-brain-tumor-seg.git
+cd levelset-brain-tumor-seg
+```
+
+### 2. Create a virtual environment and install dependencies
+```bash
+python -m venv venv
+venv\Scripts\activate       # Windows
+# source venv/bin/activate  # macOS/Linux
+
+pip install -r requirements.txt
+```
+
+`requirements.txt`:
+```
+numpy
+opencv-python
+customtkinter
+matplotlib
+numba
+```
+
+> First run will take a few extra seconds while Numba JIT-compiles the PDE solver.
 
 ## Usage
 
@@ -75,7 +138,7 @@ python main.py
 
 1. Click **Upload Batch & Segment** and select one or more MRI images (`.png`, `.jpg`, `.jpeg`, `.tif`, `.bmp`).
 2. The pipeline runs automatically: clustering → ROI detection → level set initialization → PDE evolution.
-3. Watch the live evolution of the segmentation boundary in the third panel.
+3. Watch the segmentation boundary evolve live in the third panel.
 4. Once complete, use **Prev / Next** to step through the batch — each image is segmented independently.
 
 ## How It Works, Panel by Panel
@@ -83,15 +146,28 @@ python main.py
 | Panel | Shows |
 |---|---|
 | 1. Unsupervised Clusters | Raw K-Means output over pixel intensities |
-| 2. Convex Hull ROI | The auto-selected tumor candidate contour (cyan fill) and its convex hull (green outline), with a live solidity score |
-| 3. Level Set Evolution | The MRI slice with the evolving `φ = 0` contour (neon green) overlaid, updated every 10 iterations until convergence |
+| 2. Convex Hull ROI | The auto-selected tumor candidate (cyan fill) and its convex hull (green outline), with a live solidity score |
+| 3. Level Set Evolution | The MRI slice with the evolving `φ = 0` contour (neon green) overlaid, refreshed every 10 iterations until convergence |
 
-## Limitations
+## Optimizations
 
-- Operates on 2D slices; does not perform full 3D volumetric segmentation.
+- **Numba JIT + `prange` parallelization** — the PDE core (`compute_pde_step`) is compiled ahead-of-time and distributes both the regional-mean reduction and the curvature computation across CPU cores, instead of running as interpreted Python/NumPy loops.
+- **Adaptive curvature weight** — `μ` is set lower for higher-variance (noisier) images and higher for smoother ones, instead of a single fixed value.
+- **Bounded image size** — inputs are downscaled to a maximum dimension of 400px before solving, since PDE cost scales with pixel count and MRI slices are often larger than needed for stable convergence.
+- **Async simulation thread** — the PDE solver runs on a background thread while the GUI polls for progress every 50ms, keeping the interface responsive during long-running evolutions.
+
+## Screenshots
+
+*Add screenshots of the running dashboard here (e.g. `assets/dashboard.png`) — showing the three-panel view mid-evolution is the most representative shot.*
+
+## Known Limitations / Future Scope
+
+- Operates on 2D slices; no full 3D volumetric segmentation yet.
 - Automatic ROI selection assumes the tumor is among the brighter intensity clusters — atypical or very low-contrast lesions may need manual tuning of `search_clusters` or the scoring heuristic.
+- Fixed iteration count (85) rather than convergence-based stopping; a `‖φ_new − φ_old‖` threshold would be a natural improvement.
+- Single-image-at-a-time PDE solve; batch images are processed sequentially, not in parallel with each other.
 - Research/educational tool — **not validated for clinical or diagnostic use**.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](./LICENSE)
