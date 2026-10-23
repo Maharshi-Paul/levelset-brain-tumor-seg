@@ -43,7 +43,7 @@ from .config import SolverConfig
 # ── Regularised Heaviside and Dirac ──────────────────────────────────
 
 
-@jit(nopython=True, fastmath=True)
+@jit(nopython=True, fastmath=True, cache=True)
 def regularized_heaviside(phi: float, epsilon: float = 1.0) -> float:
     r"""Smoothed Heaviside step function.
 
@@ -66,7 +66,7 @@ def regularized_heaviside(phi: float, epsilon: float = 1.0) -> float:
     return 0.5 * (1.0 + (2.0 / np.pi) * np.arctan(phi / epsilon))
 
 
-@jit(nopython=True, fastmath=True)
+@jit(nopython=True, fastmath=True, cache=True)
 def regularized_dirac(phi: float, epsilon: float = 1.0) -> float:
     r"""Smoothed Dirac delta function.
 
@@ -92,7 +92,7 @@ def regularized_dirac(phi: float, epsilon: float = 1.0) -> float:
 # ── Numba-parallel PDE kernel ────────────────────────────────────────
 
 
-@jit(nopython=True, fastmath=True, parallel=True)
+@jit(nopython=True, fastmath=True, parallel=True, cache=True)
 def compute_pde_step(
     phi: NDArray[np.float64],
     image: NDArray[np.float64],
