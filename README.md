@@ -11,15 +11,53 @@
   <img src="https://img.shields.io/badge/compute-CPU--only%20(Numba%20JIT)-orange.svg" alt="Compute: CPU-only">
 </p>
 
-**Fully automatic brain tumor segmentation from MRI — zero manual seeding, zero training data, and zero GPU required.** An unsupervised K-Means and topological ROI search pipeline feeds a Numba CPU-parallel Chan-Vese level-set PDE solver, visualized live in a CustomTkinter desktop dashboard or executed headlessly via CLI.
+**Fully automatic brain tumor segmentation from MRI — zero manual seeding, zero training data, and zero GPU required.** An unsupervised K-Means and topological ROI search pipeline feeds a Numba CPU-parallel Chan-Vese level-set PDE solver, visualized live in a CustomTkinter desktop dashboard or executed headlessly via CLI (reproducible with `--seed`).
 
 Built by [Maharshi-Paul](https://github.com/Maharshi-Paul)  
 Poster design by [DIPESHCHOUDHARY-CODES](https://github.com/DIPESHCHOUDHARY-CODES)
 
 ---
 
+## Quick Start
+
+Get running in three commands:
+
+```bash
+# 1. Clone repository
+git clone https://github.com/Maharshi-Paul/levelset-brain-tumor-seg.git
+cd levelset-brain-tumor-seg
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Launch interactive GUI (or run headlessly via CLI)
+python main.py
+# Headless CLI alternative:
+# python -m levelset_seg -i data/ -o results/ --save-panels --json metrics.json
+```
+
+---
+
+## Screenshots & Demo
+
+<!--
+TODO: Place real dashboard screenshots and recordings in assets/ once captured:
+- assets/dashboard.png (Full 3-panel GUI view during or after segmentation)
+- assets/demo.gif (Animated screen recording of contour convergence)
+
+| Full Application Dashboard | Dynamic Contour Evolution |
+|:---:|:---:|
+| ![Dashboard Screenshot](assets/dashboard.png) | ![Segmentation Demo GIF](assets/demo.gif) |
+-->
+
+*Interactive 3-panel dashboard view: Panel 1 displays unsupervised K-Means intensity clustering; Panel 2 isolates the candidate tumor contour with its green convex hull and live solidity metric; Panel 3 renders the evolving neon-green level-set boundary over the MRI slice in real time.*
+
+---
+
 ## Table of Contents
 
+- [Quick Start](#quick-start)
+- [Screenshots & Demo](#screenshots--demo)
 - [Problem](#problem)
 - [Solution](#solution)
 - [On-Device Compute Usage](#on-device-compute-usage)
@@ -29,13 +67,15 @@ Poster design by [DIPESHCHOUDHARY-CODES](https://github.com/DIPESHCHOUDHARY-CODE
 - [Usage](#usage)
   - [Interactive GUI Dashboard](#1-interactive-gui-dashboard)
   - [Headless Command-Line Interface (CLI)](#2-headless-command-line-interface-cli)
+  - [Mask Evaluation Tool](#3-mask-evaluation-tool-evaluatepy)
 - [Running Tests & Linting](#running-tests--linting)
 - [How It Works, Panel by Panel](#how-it-works-panel-by-panel)
-- [Screenshots & Demo](#screenshots--demo)
 - [Experimental Results](#experimental-results)
 - [Data Source & Attribution](#data-source--attribution)
 - [Performance Optimizations](#performance-optimizations)
 - [Clinical Disclaimer & Limitations](#clinical-disclaimer--limitations)
+- [References](#references)
+- [Citation](#citation)
 - [License](#license)
 
 ---
@@ -52,7 +92,7 @@ Simpler intensity thresholding breaks down on low-contrast, noisy tissue margins
 
 ## Solution
 
-`levelset-brain-tumor-seg` eliminates manual intervention entirely. It provides an end-to-end, deterministic, CPU-only pipeline:
+`levelset-brain-tumor-seg` eliminates manual intervention entirely. It provides an end-to-end, CPU-only pipeline (reproducible with `--seed`):
 
 ```
 [MRI Slice] ──> [CLAHE & Blur] ──> [K-Means (k=5)] ──> [Topological ROI Scoring] ──> [Initial SDF φ₀] ──> [Chan-Vese PDE (Numba CPU)] ──> [Tumor Contour]
@@ -61,7 +101,7 @@ Simpler intensity thresholding breaks down on low-contrast, noisy tissue margins
 1. **Contrast Enhancement & Unsupervised Clustering**: Contrast-Limited Adaptive Histogram Equalization (CLAHE) and mild Gaussian filtering enhance tissue contrast, followed by OpenCV K-Means ($k=5$) to partition intensities without supervision.
 2. **Topological ROI Discovery**: The brightest tissue clusters are scanned for candidate contours. Each contour is evaluated using a geometric scoring heuristic balancing area, convexity (solidity), and circularity:
    $$\text{Score} = \sqrt{\text{Area}} \cdot \text{Solidity}^3 \cdot \text{Circularity}^3$$
-   This automatically isolates meningioma-like circular masses without seed points.
+   This automatically isolates round, convex tumor masses without seed points.
 3. **Two-Phase Chan-Vese Level-Set PDE**: The detected ROI initializes a signed distance function (SDF) $\phi_0$, which is evolved according to the Chan-Vese energy functional using CPU-parallelized finite differences to lock onto the precise tissue boundary.
 
 > **Note on Terminology**: The overall *software pipeline* operates in multiple stages (preprocessing $\rightarrow$ topological selection $\rightarrow$ PDE evolution), while the mathematical level-set solver implements a **two-phase** Chan-Vese model (partitioning the domain into interior $\phi < 0$ and exterior $\phi > 0$ regions).
@@ -78,42 +118,56 @@ Simpler intensity thresholding breaks down on low-contrast, noisy tissue margins
 | Unsupervised Clustering | Intensity grouping into 5 clusters | OpenCV K-Means (CPU) |
 | Topological Search | Contour extraction, convex hull, shape scoring | OpenCV Contours |
 | SDF Initialization | Exact Euclidean Distance Transform | OpenCV Distance Transform ($L_2$) |
-| Level-Set PDE Solver | Curvature, Dirac/Heaviside updates, reductions | Numba JIT + `prange` CPU parallelism |
+| Level-Set PDE Solver | Curvature, Dirac/Heaviside updates, reductions | Numba JIT + `prange` CPU parallelism (`cache=True`) |
 
 No network telemetry, no external API calls, and no patient data leaves the local machine.
 
 ---
 
-## Mathematical Formulation
+<details>
+<summary><strong>Mathematical Formulation (Click to expand)</strong></summary>
+
+### Level-Set Representation and Sign Convention
 
 The tumor boundary $C$ is represented implicitly as the zero level set of a Lipschitz-continuous signed distance function $\phi: \Omega \rightarrow \mathbb{R}$:
 
 $$C = \{ \mathbf{x} \in \Omega \mid \phi(\mathbf{x}) = 0 \}$$
 
-Inside the tumor, $\phi < 0$; outside the tumor, $\phi > 0$.
+In accordance with the solver implementation:
+- **Tumor interior**: $\phi(\mathbf{x}) < 0$
+- **Exterior / background**: $\phi(\mathbf{x}) > 0$
+- **Interface / contour**: $\phi(\mathbf{x}) = 0$
 
-### Chan-Vese Energy Minimization
+### Regional Means
 
-The Chan-Vese model (Chan & Vese, 2001) minimizes the energy functional:
+Regional means $c_1$ and $c_2$ are computed via continuous Heaviside weighting:
+- $c_1$ is the average intensity of the **exterior / background** region ($\phi > 0$), weighted by the smoothed Heaviside step $H_\varepsilon(\phi)$:
+  $$c_1 = \frac{\int_\Omega I(\mathbf{x}) \cdot H_\varepsilon(\phi(\mathbf{x})) \, d\mathbf{x}}{\int_\Omega H_\varepsilon(\phi(\mathbf{x})) \, d\mathbf{x}}$$
+- $c_2$ is the average intensity of the **tumor interior** region ($\phi < 0$), weighted by $1 - H_\varepsilon(\phi)$:
+  $$c_2 = \frac{\int_\Omega I(\mathbf{x}) \cdot (1 - H_\varepsilon(\phi(\mathbf{x}))) \, d\mathbf{x}}{\int_\Omega (1 - H_\varepsilon(\phi(\mathbf{x}))) \, d\mathbf{x}}$$
 
-$$F(c_1, c_2, \phi) = \mu \int_\Omega \delta(\phi) |\nabla \phi| \, d\mathbf{x} + \lambda_1 \int_\Omega |I - c_1|^2 H(\phi) \, d\mathbf{x} + \lambda_2 \int_\Omega |I - c_2|^2 (1 - H(\phi)) \, d\mathbf{x}$$
+### Chan-Vese Energy Functional
+
+The two-phase Chan-Vese functional (Chan & Vese, 2001) being minimized is:
+
+$$F(c_1, c_2, \phi) = \mu \cdot \text{Length}(\phi = 0) + \lambda_1 \int_\Omega |I(\mathbf{x}) - c_1|^2 H_\varepsilon(\phi) \, d\mathbf{x} + \lambda_2 \int_\Omega |I(\mathbf{x}) - c_2|^2 (1 - H_\varepsilon(\phi)) \, d\mathbf{x}$$
 
 where:
 - $I(\mathbf{x}) \in [0, 1]$ is the normalized image intensity.
-- $c_1$ and $c_2$ are the Heaviside-weighted average intensities inside ($\phi < 0$) and outside ($\phi > 0$) the contour:
-  $$c_1 = \frac{\int_\Omega I \cdot (1 - H(\phi)) \, d\mathbf{x}}{\int_\Omega (1 - H(\phi)) \, d\mathbf{x}}, \quad c_2 = \frac{\int_\Omega I \cdot H(\phi) \, d\mathbf{x}}{\int_\Omega H(\phi) \, d\mathbf{x}}$$
-- $\mu$ controls boundary smoothness via curvature regularisation.
-- $\lambda_1, \lambda_2$ scale internal and external data fidelity.
+- $\mu$ controls boundary smoothness (penalizing contour length).
+- $\lambda_1, \lambda_2$ scale exterior and interior data fidelity.
 
-### Euler-Lagrange Evolution Equation
+### Euler-Lagrange Evolution PDE
 
-Minimizing $F$ with respect to $\phi$ produces the parabolic PDE:
+Gradient descent on $F$ with respect to $\phi$ yields the evolution equation implemented in `compute_pde_step`:
 
 $$\frac{\partial \phi}{\partial t} = \delta_\varepsilon(\phi) \left[ \mu \cdot \kappa(\phi) - \lambda_1 (I - c_1)^2 + \lambda_2 (I - c_2)^2 \right]$$
 
 where $\kappa(\phi) = \text{div}\left(\frac{\nabla \phi}{|\nabla \phi|}\right)$ is the mean curvature computed using central finite differences:
 
 $$\kappa = \frac{\phi_{xx} \phi_y^2 - 2 \phi_x \phi_y \phi_{xy} + \phi_{yy} \phi_x^2}{(\phi_x^2 + \phi_y^2 + \eta)^{3/2}}$$
+
+Here $\eta = 10^{-10}$ is a numerical regularization constant in the denominator preventing division by zero in zero-gradient flat regions where $|\nabla \phi| \approx 0$.
 
 ### Regularized Heaviside and Dirac Delta
 
@@ -131,13 +185,16 @@ All defaults are defined in `SolverConfig` (`levelset_seg/config.py`):
 |---|---|---|
 | `total_iterations` | `85` | Fixed evolution steps (when convergence stopping is inactive) |
 | `dt` | `0.5` | Euler integration time step |
-| `lambda1`, `lambda2` | `1.0`, `1.0` | Interior and exterior region-fitting weights |
-| `mu` | Adaptive (`0.25` or `0.5`) | Curvature regularization weight ($0.25$ if $\text{Var}(I) \ge 0.05$, else $0.5$) |
+| `lambda1`, `lambda2` | `1.0`, `1.0` | Exterior and interior data-fidelity weights |
+| `mu` | Adaptive (`0.25` or `0.5`) | Curvature weight: $0.25$ if $\text{Var}(I) \ge 0.05$ (textured/noisy), else $0.5$ (smooth) |
+| `variance_threshold` | `0.05` | Variance cutoff determining adaptive $\mu$ |
 | `epsilon` | `1.0` | Heaviside / Dirac regularization width |
-| `max_dim` | `400` | Maximum spatial dimension for image scaling |
-| `kmeans_k` | `5` | Number of clusters for tissue partitioning |
-| `phi_clip` | `5.0` | Signed distance clamp interval $[-5.0, +5.0]$ |
+| `max_dim` | `400` | Maximum spatial dimension for aspect-preserving scaling |
+| `kmeans_k` | `5` | Number of clusters for intensity partitioning |
+| `phi_clip` | `5.0` | Symmetric signed distance clamp $[-5.0, +5.0]$ |
 | `convergence_tol` | `None` | Optional early stopping tolerance $\max|\phi_{t+1} - \phi_t| < \text{tol}$ |
+
+</details>
 
 ---
 
@@ -148,15 +205,17 @@ levelset-brain-tumor-seg/
 ├── levelset_seg/                  # Core package
 │   ├── __init__.py                # Package export & version metadata
 │   ├── __main__.py                # CLI entry point (python -m levelset_seg)
-│   ├── cli.py                     # Headless command-line interface
+│   ├── cli.py                     # Headless CLI (batch, panels, JSON)
 │   ├── config.py                  # SolverConfig dataclass (single source of truth)
+│   ├── evaluate.py                # Dice and IoU evaluation functions
 │   ├── gui.py                     # CustomTkinter + Matplotlib dashboard
 │   ├── preprocessing.py          # CLAHE, Gaussian blur, scaling, K-Means
 │   ├── roi.py                     # Topological contour scoring & SDF creation
-│   └── solver.py                  # Numba-parallelized Chan-Vese PDE solver
+│   └── solver.py                  # Numba-parallelized Chan-Vese PDE solver (cache=True)
 ├── tests/                         # Pytest test suite
 │   ├── __init__.py
-│   ├── test_cli.py                # Headless CLI integration tests
+│   ├── test_cli.py                # Headless CLI & batch tests
+│   ├── test_evaluate.py           # Dice & IoU unit tests on synthetic masks
 │   ├── test_preprocessing.py      # CLAHE & K-Means unit tests
 │   ├── test_roi.py                # Shape scoring & SDF clamp tests
 │   └── test_solver.py             # Math invariants (Heaviside/Dirac) & synthetic IoU
@@ -165,11 +224,13 @@ levelset-brain-tumor-seg/
 │       └── ci.yml                 # GitHub Actions CI matrix (Python 3.10–3.14)
 ├── assets/                        # Visual banners & UI assets
 │   └── levelset_banner.png
-├── data/                          # Sample axial MRI brain slices (meningioma)
+├── data/                          # Sample brain MRI slices (meningioma)
+├── evaluate.py                    # Standalone evaluation CLI
 ├── main.py                        # Thin application launcher
 ├── pyproject.toml                 # Ruff linting & pytest configuration
 ├── requirements.txt               # Pinned core production dependencies
 ├── requirements-dev.txt           # Testing & linting tools
+├── CITATION.cff                   # Citation metadata
 ├── .gitignore
 ├── LICENSE                        # MIT License
 └── README.md
@@ -199,11 +260,21 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1
 ```
 
+**Windows (Command Prompt):**
+```cmd
+python -m venv venv
+venv\Scripts\activate.bat
+```
+
 **macOS / Linux:**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
+
+> **Note for Linux / macOS GUI Users**: If running the graphical desktop interface on Linux or macOS, ensure system Tkinter bindings are present:
+> - **Ubuntu / Debian**: `sudo apt-get install python3-tk`
+> - **macOS (Homebrew)**: `brew install python-tk`
 
 ### 3. Install Dependencies
 
@@ -217,7 +288,7 @@ To install development and testing tools:
 pip install -r requirements-dev.txt
 ```
 
-> **Note on Numba Compilation**: When running for the first time, Numba JIT-compiles `compute_pde_step` and mathematical kernels. Subsequent steps execute at native C-level speed.
+> **Note on Numba Compilation**: Numba JIT functions use `cache=True`. Compilation occurs on the initial invocation and is cached for subsequent runs, delivering near-native execution speed.
 
 ---
 
@@ -231,7 +302,7 @@ Launch the desktop application:
 python main.py
 ```
 
-1. Click **Upload Batch & Segment** and choose one or more axial MRI images from `data/` or your own files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.bmp`).
+1. Click **Upload Batch & Segment** and choose one or more MRI images from `data/` or your own files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.bmp`).
 2. Watch the three-panel display:
    - Panel 1 shows unsupervised intensity clustering.
    - Panel 2 isolates the candidate tumor contour and highlights its convex hull with live solidity metrics.
@@ -243,38 +314,57 @@ python main.py
 For batch processing, automated scripting, or headless servers (without Tkinter/X11):
 
 ```bash
-# Basic headless segmentation
+# Basic single-image segmentation
 python -m levelset_seg --input data/Te-me_0015.jpg --output output_overlay.png
 
-# Custom iterations and reproducible RNG seed
-python -m levelset_seg -i data/Tr-me_0019.jpg -o tumor_seg.png --iterations 60 --seed 42
+# Batch-process an entire directory of images
+python -m levelset_seg --input data/ --output results/
+
+# Full batch run with 3-panel visualisations, metrics JSON, and fixed RNG seed:
+python -m levelset_seg -i data/ -o results/ --save-panels --json results/metrics.json --seed 42
 
 # Early stopping via convergence tolerance
-python -m levelset_seg -i data/Te-me_0083.jpg -o result.png --convergence-tol 0.005
+python -m levelset_seg -i data/Te-me_0015.jpg -o result.png --convergence-tol 0.005
 ```
 
 CLI options:
-- `-i, --input`: Path to input MRI slice (required).
-- `-o, --output`: Path to save output contour overlay PNG (required).
+- `-i, --input`: Path to input image file or directory of images (required).
+- `-o, --output`: Path to save output overlay PNG (or directory if `--input` is a directory) (required).
 - `--iterations`: Number of PDE iterations (overrides default 85).
 - `--convergence-tol`: Stop early when $\max|\phi_{t+1} - \phi_t| < \text{tol}$.
-- `--seed`: OpenCV random seed for deterministic K-Means cluster initialization.
+- `--seed`: OpenCV random seed for reproducible K-Means cluster initialization.
+- `--save-panels`: Save side-by-side 3-panel visualization (K-Means, ROI, level set).
+- `--json [FILE]`: Output execution metrics as JSON (pass a file path, or omit to print to stdout).
+
+### 3. Mask Evaluation Tool (`evaluate.py`)
+
+Compute Dice Similarity Coefficient (DSC) and Intersection over Union (IoU / Jaccard Index) between predicted binary masks and ground-truth annotations:
+
+```bash
+# Print metrics to stdout
+python evaluate.py --pred path/to/pred_mask.png --gt path/to/gt_mask.png
+
+# Output as JSON
+python evaluate.py --pred path/to/pred_mask.png --gt path/to/gt_mask.png --json
+```
 
 ---
 
 ## Running Tests & Linting
 
-Run the complete test suite:
+Run the test suite with pytest:
 
 ```bash
 pytest -v
 ```
 
-All 27 unit and integration tests execute headlessly on synthetic images and mathematical functions:
-- Unit verification of smoothed Heaviside and Dirac properties ($H(0) = 0.5$, $\delta(0) = 1/\pi$, asymptotic limits).
-- Synthetic bright-disc segmentation integration tests asserting contour overlap ($\text{IoU} \ge 0.7$).
-- Image scaling, CLAHE contrast bounds, and K-Means shape verification.
-- End-to-end CLI workflow tests.
+The pytest test suite covers:
+- Invariants of regularized Heaviside and Dirac delta formulations ($H(0) = 0.5$, $\delta(0) = 1/\pi$, asymptotic limits, monotonicity, symmetry).
+- Synthetic disc segmentation integration test asserting contour recovery ($\text{IoU} \ge 0.7$).
+- Image scaling, aspect-ratio preservation, CLAHE contrast bounds, and K-Means clustering.
+- Topological shape scoring, distance-transform sign convention, and SDF clipping.
+- Dice and IoU calculation across identical, disjoint, and partially overlapping masks.
+- Full end-to-end headless CLI workflows (single-file, directory batch, `--save-panels`, `--json`).
 
 Run lint checks with Ruff:
 
@@ -288,34 +378,35 @@ ruff check .
 
 | Panel | Method | Visual Output |
 |---|---|---|
-| **1. Unsupervised Clusters** | $k$-Means clustering on CLAHE intensity space | Color-coded cluster partition representing distinct brain tissues (CSF, grey matter, white matter, pathology). |
+| **1. Unsupervised Clusters** | $k$-Means clustering on CLAHE intensity space | Color-coded partition of pixel intensities into 5 discrete clusters. |
 | **2. Convex Hull ROI** | Morphological filtering + contour scoring ($\sqrt{A} \cdot S^3 \cdot C^3$) | Selected tumor candidate filled in cyan with its convex hull boundary in green; live display of the calculated solidity metric. |
 | **3. Level Set Evolution** | Chan-Vese PDE solved via Euler finite differences | Original MRI slice overlaid with the dynamic $\phi = 0$ contour (neon green), updated in real time as the contour converges. |
 
 ---
 
-## Screenshots & Demo
-
-<!-- TODO: Capture real screenshots and animations of the running CustomTkinter dashboard using images from data/ -->
-
-| Full Application Dashboard | Dynamic Contour Evolution |
-|:---:|:---:|
-| ![Dashboard Screenshot](assets/dashboard.png) <br> *(TODO: Replace with dashboard.png screenshot)* | ![Segmentation Demo GIF](assets/demo.gif) <br> *(TODO: Replace with demo.gif animation)* |
-
----
-
 ## Experimental Results
 
-<!-- TODO: Once ground-truth annotations are available for the data/ set, calculate and document exact Dice and IoU metrics here -->
+Below are benchmark runtimes and topological metrics recorded across sample images in `data/`:
 
-| Image ID | Tumor Type | Resolution | Slice Solidity | Dice Score | IoU (Jaccard) | Iterations | Solve Time (s) |
-|---|---|---|---|---|---|---|---|
-| `Te-me_0015` | Meningioma | 400 × 335 | 0.987 | *TODO* | *TODO* | 85 | ~2.6s |
-| `Te-me_0041` | Meningioma | 400 × 400 | 0.965 | *TODO* | *TODO* | 85 | ~2.5s |
-| `Tr-me_0019` | Meningioma | 400 × 382 | 0.978 | *TODO* | *TODO* | 85 | ~2.4s |
-| `Tr-me_0060` | Meningioma | 400 × 356 | 0.952 | *TODO* | *TODO* | 85 | ~2.5s |
+| Image ID | Dimensions | ROI Solidity | Iterations | Solve Time (s) |
+|---|---|---|---|---|
+| `Te-me_0015.jpg` | 400 × 335 | 0.9866 | 85 | 1.182s *(first-call JIT compilation)* |
+| `Te-me_0020.jpg` | 306 × 306 | 0.9177 | 85 | 0.125s |
+| `Te-me_0223.jpg` | 400 × 400 | 0.8901 | 85 | 0.139s |
+| `Tr-me_0019.jpg` | 400 × 400 | 0.9176 | 85 | 0.113s |
+| `Tr-me_0037.jpg` | 400 × 400 | 0.8953 | 85 | 0.109s |
+| `Tr-me_0083.jpg` | 400 × 400 | 0.8951 | 85 | 0.133s |
+| `Tr-me_0089.jpg` | 400 × 400 | 0.9190 | 85 | 0.126s |
+| `Tr-me_0108.jpg` | 400 × 400 | 0.9827 | 85 | 0.160s |
+| `Tr-me_0177.jpg` | 270 × 250 | 0.9723 | 85 | 0.067s |
+| `Tr-me_0594.jpg` | 320 × 257 | 0.9528 | 85 | 0.084s |
 
-*Note: Dice and IoU evaluation require pixel-level ground-truth masks. The table above reflects sample execution times and detected solidity scores on an Intel/AMD multicore CPU.*
+**Benchmark Provenance**:
+- **Platform**: Microsoft Windows 11, x86_64
+- **Software**: Python 3.14.3, Numba 0.65.1 (with `cache=True`), NumPy 2.4.4, OpenCV 4.13.0
+- **Execution**: Run with `--seed 42` via `python -m levelset_seg -i data/ -o bench/ --json`.
+- **Timing Profile**: The first slice includes one-time LLVM JIT compilation overhead (~1.18s); subsequent steady-state iterations execute in ~0.07s–0.16s per image (average steady-state solve time: ~0.11s).
+- **Segmentation Accuracy**: Pixel-level evaluation (Dice and IoU) requires ground-truth boundary masks. Quantitative metrics can be generated using [`evaluate.py`](file:///c:/Users/rumki/Desktop/Projects/levelset-brain-tumor-seg/evaluate.py) as annotated masks become available.
 
 ---
 
@@ -326,19 +417,19 @@ The sample images included in `data/` follow the `Te-me_*` and `Tr-me_*` naming 
 2. **SARTAJ Dataset**
 3. **Br35H Dataset**
 
-- **Class**: Meningioma (`me`) axial T1-weighted contrast-enhanced slices.
+- **Class**: Meningioma (`me`) brain MRI slices.
 - **License**: See the [Kaggle Dataset Page](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) <!-- TODO: Confirm specific upstream image license terms -->.
 
 ---
 
 ## Performance Optimizations
 
-1. **Numba JIT Compilation with `parallel=True`**:
-   The PDE update core (`compute_pde_step`) compiles down to native machine code at runtime via LLVM. Both the dual spatial reductions (interior/exterior regional averages $c_1, c_2$) and the central finite-difference curvature updates leverage multi-core CPU scheduling through OpenMP/TBB `prange`.
+1. **Numba JIT Compilation with `parallel=True` and `cache=True`**:
+   The PDE update core (`compute_pde_step`) compiles to native machine instructions via LLVM with persistent disk caching. Both the dual spatial reductions (exterior/interior regional averages $c_1, c_2$) and the central finite-difference curvature updates leverage multi-core CPU scheduling through OpenMP/TBB `prange`.
 2. **Adaptive Curvature Regularization**:
    The curvature parameter $\mu$ dynamically adapts to image variance ($\mu = 0.25$ for textured/noisy images with variance $\ge 0.05$; $\mu = 0.5$ for homogeneous slices), preventing boundary over-smoothing on delicate margins.
 3. **Bounded Aspect-Preserving Scaling**:
-   Images exceeding 400px along any dimension are scaled down while maintaining exact aspect ratios, bounding finite-difference operations to $\le 160{,}000$ grid points without sacrificing clinical detail.
+   Images exceeding 400px along any dimension are scaled down while maintaining exact aspect ratios, bounding finite-difference operations to $\le 160{,}000$ grid points.
 4. **Non-Blocking Background Threading**:
    The GUI decouples numerical simulation from UI rendering via background worker threads (`threading.Thread`), streaming state updates via polling events without freezing window events.
 
@@ -352,8 +443,31 @@ The sample images included in `data/` follow the `Te-me_*` and `Tr-me_*` naming 
 
 ### Known Technical Limitations
 - **2D Slice Analysis**: Operates on single 2D slices; does not perform 3D anisotropic volumetric reconstruction across z-stacks.
-- **Intensity Prior**: The automated ROI search assumes tumor tissue falls within the top three brightest intensity clusters in contrast-enhanced T1 MRI. Hypointense or non-enhancing necrotic cores may require adjusted search clusters.
-- **Topology Changes**: Standard two-phase Chan-Vese assumes a single background and foreground class; complex multi-component tumors (e.g., heterogeneous glioblastoma with surrounding edema) require multi-phase level-set extensions.
+- **Two-phase model**: Standard two-phase Chan-Vese assumes a single background and foreground class; complex multi-component tumors (e.g., heterogeneous glioblastoma with surrounding necrotic core and edema) require multi-phase level-set formulations.
+- **Geometric Prior**: The automated ROI selection scoring ($\sqrt{\text{Area}} \cdot \text{Solidity}^3 \cdot \text{Circularity}^3$) specifically favors round, convex regions. While well-suited to meningiomas, it may struggle with irregular, infiltrative, or multi-focal pathologies.
+- **Sample Dataset**: The bundled sample images in `data/` consist exclusively of meningioma cases.
+
+---
+
+## References
+
+- T. F. Chan and L. A. Vese, "Active contours without edges," *IEEE Transactions on Image Processing*, vol. 10, no. 2, pp. 266–277, Feb. 2001. doi: [10.1109/83.902291](https://doi.org/10.1109/83.902291).
+
+---
+
+## Citation
+
+If you use this repository in academic or research work, please cite it using the metadata in [CITATION.cff](file:///c:/Users/rumki/Desktop/Projects/levelset-brain-tumor-seg/CITATION.cff):
+
+```bibtex
+@software{Paul_levelset_brain_tumor_seg_2026,
+  author = {Paul, Maharshi},
+  title = {{levelset-brain-tumor-seg: Fully Automatic Level-Set Brain Tumor Segmentation}},
+  url = {https://github.com/Maharshi-Paul/levelset-brain-tumor-seg},
+  version = {0.1.0},
+  year = {2026}
+}
+```
 
 ---
 

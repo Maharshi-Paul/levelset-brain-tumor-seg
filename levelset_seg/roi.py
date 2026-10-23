@@ -7,10 +7,10 @@ contours and picks the one that maximises
 
 where *solidity* = area / convex-hull area and *circularity* =
 4π·area / perimeter².  This heuristic favours large, convex, roughly
-circular regions — typical of meningioma-like tumors in axial MRI
-slices.
+circular regions — typical of meningioma-like tumors in MRI slices.
 
 All operations match the original ``main.py`` pipeline exactly.
+
 """
 
 from __future__ import annotations
