@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or project, please cite it as below."
+title: "levelset-brain-tumor-seg: Fully Automatic Level-Set Brain Tumor Segmentation"
+authors:
+  - family-names: "Paul"
+    given-names: "Maharshi"
+version: 0.1.0
+date-released: 2026-10-23
+url: "https://github.com/Maharshi-Paul/levelset-brain-tumor-seg"
+license: MIT
+references:
+  - type: article
+    title: "Active contours without edges"
+    authors:
+      - family-names: "Chan"
+        given-names: "Tony F."
+      - family-names: "Vese"
+        given-names: "Luminita A."
+    journal: "IEEE Transactions on Image Processing"
+    volume: 10
+    issue: 2
+    pages: "266-277"
+    year: 2001
+    doi: "10.1109/83.902291"
