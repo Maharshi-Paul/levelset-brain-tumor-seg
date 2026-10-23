@@ -12,17 +12,17 @@ All numerical behaviour is delegated to :mod:`levelset_seg.preprocessing`,
 from __future__ import annotations
 
 import threading
+from tkinter import filedialog
 
 import customtkinter as ctk
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from tkinter import filedialog
 
 from .config import SolverConfig
 from .preprocessing import preprocess
 from .roi import find_best_roi, initialise_phi
-from .solver import evolve, compute_pde_step
+from .solver import compute_pde_step
 
 # Set modern appearance
 ctk.set_appearance_mode("Dark")

@@ -40,7 +40,6 @@ from numpy.typing import NDArray
 
 from .config import SolverConfig
 
-
 # ── Regularised Heaviside and Dirac ──────────────────────────────────
 
 

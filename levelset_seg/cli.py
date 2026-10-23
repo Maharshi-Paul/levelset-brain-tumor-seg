@@ -11,7 +11,6 @@ final contour overlay as a PNG.  No GUI or display required.
 from __future__ import annotations
 
 import argparse
-import sys
 
 import cv2
 import numpy as np
