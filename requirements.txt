@@ -1,5 +1,9 @@
-numpy
-opencv-python
-customtkinter
-matplotlib
-numba
+# levelset-brain-tumor-seg
+# Tested on Python 3.10, 3.11, 3.12, 3.14
+#
+# Core dependencies
+numpy~=2.4
+opencv-python~=4.13
+customtkinter~=5.2
+matplotlib~=3.10
+numba~=0.65
