@@ -23,6 +23,7 @@ Built by [Maharshi-Paul](https://github.com/Maharshi-Paul) · Poster design by [
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Sample Outputs](#sample-outputs)
 - [Problem](#problem)
 - [Solution](#solution)
 - [On-Device Compute Usage](#on-device-compute-usage)
@@ -77,6 +78,24 @@ section (and its Table of Contents entry) with:
 - assets/dashboard.png: full 3-panel GUI view during or after segmentation
 - assets/demo.gif: screen recording of contour convergence
 -->
+
+---
+
+## Sample Outputs
+
+Pre-generated results from the sample MRI slices in `data/` are included in [`sample_outputs/`](./sample_outputs), so you can see what the pipeline produces without installing anything. For each input image, the CLI writes:
+
+- **Contour overlay:** the original slice with the final $\phi = 0$ tumor boundary drawn on top.
+- **3-panel visualization** (with `--save-panels`): K-Means clusters, selected ROI with its convex hull, and the evolved level set. See [How It Works, Panel by Panel](#how-it-works-panel-by-panel).
+- **Execution metrics** (with `--json`): ROI solidity, iteration count, and solve time. These are the same figures reported in [Benchmarks](#benchmarks).
+
+To regenerate them locally:
+
+```bash
+python -m levelset_seg -i data/ -o sample_outputs/ --save-panels --json sample_outputs/metrics.json --seed 42
+```
+
+Using `--seed 42` makes the K-Means initialization deterministic, so your results should match the committed outputs closely.
 
 ---
 
